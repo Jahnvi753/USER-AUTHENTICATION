@@ -15,8 +15,17 @@ db.exec(`
     )
 `)
 
+try {
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users (LOWER(username))')
+} catch (error) {
+    console.warn('Could not create case-insensitive username index:', error.message)
+}
+
 app.use(express.urlencoded({ extended: true }))
 app.use(express.static('public'))
+app.get('/' , (req, res) => {
+    res.redirect('signup.html')
+})
 app.use(session({
     secret: 'your-secret-key',
     resave: false,
@@ -25,16 +34,30 @@ app.use(session({
 }))
 
 app.post('/signup', async (req, res) => {
-    const { Uname, Email, pwd } = req.body
+    const Uname = req.body.Uname?.trim()
+    const Email = req.body.Email?.trim()
+    const pwd = req.body.pwd
+
+    if (!Uname || !Email || !pwd) {
+        return res.send('All fields are required!')
+    }
+
+    const existingUser = db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?)').get(Uname)
+    if (existingUser) {
+        return res.send('Username already exists!')
+    }
+
     try{
     const hashedPassword = await bcrypt.hash(pwd, 10)
     const insert = db.prepare('Insert into users (username, email, password) VALUES (?,?,?)')
    insert.run(Uname, Email, hashedPassword)
    res.send('User saved!')
    } catch(error){
-     if (error.message.includes('UNIQUE constrain failed!')){
-        res.send('Username already exists!')
+     if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.message.includes('UNIQUE constraint failed')){
+        return res.send('Username already exists!')
      }
+     console.error(error)
+     res.status(500).send('Something went wrong while creating the user.')
    }
   
 })
